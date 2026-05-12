@@ -1,0 +1,71 @@
+name: Build MyST Paper
+
+on:
+  workflow_call:
+    inputs:
+      paper-environment-file:
+        description: "Name of the paper-specific environment file (optional)"
+        required: false
+        type: string
+        default: "paper-environment.yml"
+      base_url:
+        description: "Determines where the website is served from, including CSS & JS assets (needed for MyST)"
+        required: false
+        type: string
+        default: "/${{ github.event.repository.name }}"
+      artifact-name:
+        description: "Name of the artifact to upload with the built paper (contains _build/)"
+        required: false
+        type: string
+        default: "paper-build"
+
+env:
+  BASE_URL: ${{ inputs.base_url }}
+  BASE_ENV_VERSION: v0.1.0
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Fetch base environment file
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/impact-scholars/isp-actions-config/${{ env.BASE_ENV_VERSION }}/environment.yml -o base-environment.yml
+
+      - name: Setup Micromamba with base environment
+        uses: mamba-org/setup-micromamba@add3a49764cedee8ee24e82dfde87f5bc2914462 # v2.0.7
+        with:
+          environment-file: base-environment.yml
+          generate-run-shell: true
+          cache-environment: true
+          cache-downloads: true
+
+      - name: Install paper-specific packages
+        run: |
+          if [ -f "${{ inputs.paper-environment-file }}" ]; then
+            echo "Found ${{ inputs.paper-environment-file }}, installing paper-specific packages..."
+            micromamba install --file ${{ inputs.paper-environment-file }} --yes
+          else
+            echo "No ${{ inputs.paper-environment-file }} found, skipping paper-specific packages"
+          fi
+        shell: micromamba-shell {0}
+
+      - name: MyST build exports (PDF, Typst)
+        run: myst build --all
+        shell: micromamba-shell {0}
+
+      - name: MyST build HTML
+        run: myst build --html
+        shell: micromamba-shell {0}
+
+      - name: Upload paper build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: _build/
+          if-no-files-found: error
