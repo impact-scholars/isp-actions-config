@@ -13,7 +13,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: write
+      pull-requests: write   # post sticky comment + apply label on the PR
+      issues: write          # create the editor-action-needed label if missing
     steps:
       - name: Checkout paper repo
         uses: actions/checkout@v4
@@ -73,3 +74,14 @@ jobs:
             CI will populate that draft once the new `v*` tag is pushed. The editor then clicks **Publish** on Zenodo to finalize.
 
             Concept DOI: `${{ steps.doi.outputs.doi }}`
+
+      - name: Apply editor-action-needed label
+        if: steps.published.outputs.found == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          # Idempotent — gh label create returns non-zero if the label exists, which is fine.
+          gh label create editor-action-needed --color b60205 --description "An editor must take action before this can proceed" 2>/dev/null || true
+          gh pr edit "$PR_NUMBER" --add-label editor-action-needed
