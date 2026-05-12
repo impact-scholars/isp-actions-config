@@ -58,6 +58,24 @@ def is_sandbox_doi(doi: str) -> bool:
     return doi.startswith(PREFIX_SANDBOX)
 
 
+def emit_result(status: str, **kwargs) -> None:
+    """Emit the run's outcome as a single JSON object on stdout.
+
+    This is the script's contract with the calling workflow. Each subcommand must
+    call emit_result exactly once before returning.
+
+    Shape:
+      success → {"status": "ok",    "version_doi": ..., "draft_url": ..., ...domain fields}
+      failure → {"status": "error", "message": "<one-line or markdown>", ...optional context}
+
+    The workflow parses `.status` (must equal "ok" to continue) and surfaces
+    `.message` verbatim in the editor-action issue body on failure. Optional
+    context fields (e.g. `record_url` for the no-draft case) are for debugging
+    via the run log; the workflow does not depend on them.
+    """
+    print(json.dumps({"status": status, **kwargs}, indent=2))
+
+
 def request(method: str, url: str, token: str, **kw) -> requests.Response:
     params = kw.pop("params", None) or {}
     params.setdefault("access_token", token)
@@ -303,46 +321,46 @@ def cmd_publish(args) -> int:
 
     concept_doi = project.get("doi")
     if not concept_doi:
-        sys.stderr.write("project.doi missing — run prepare and merge that PR before tagging.\n")
+        emit_result("error", message="project.doi missing — run prepare and merge that PR before tagging.")
         return 2
     if is_sandbox_doi(concept_doi) != args.sandbox:
-        sys.stderr.write(
-            f"DOI prefix says sandbox={is_sandbox_doi(concept_doi)} but --sandbox={args.sandbox}.\n"
-        )
+        emit_result("error", message=(
+            f"DOI prefix says sandbox={is_sandbox_doi(concept_doi)} but --sandbox={args.sandbox}."
+        ))
         return 2
 
     api = api_base(args.sandbox)
     tag = args.tag
     if not re.match(r"^v\d+\.\d+\.\d+$", tag):
-        sys.stderr.write(f"tag must match vMAJOR.MINOR.PATCH (got {tag})\n")
+        emit_result("error", message=f"tag must match vMAJOR.MINOR.PATCH (got {tag})")
         return 2
     version = tag[1:]
 
     pdf = Path(args.pdf)
     if not pdf.is_file():
-        sys.stderr.write(f"--pdf not found: {pdf}\n")
+        emit_result("error", message=f"--pdf not found: {pdf}")
         return 2
 
     github_url = project.get("github")
     if not github_url:
-        sys.stderr.write("project.github missing — should have been set by prepare.\n")
+        emit_result("error", message="project.github missing — should have been set by prepare.")
         return 2
 
     latest_id = latest_version_dep_id(api, args.token, concept_doi)
     if latest_id is None:
-        sys.stderr.write(
-            f"no Zenodo record matches {concept_doi} (token mismatch? deleted draft?)\n"
-        )
+        emit_result("error", message=(
+            f"No Zenodo record matches {concept_doi} (token mismatch? deleted draft?)"
+        ))
         return 2
 
     dep = get_deposition(api, args.token, latest_id)
 
     expected_concept = f"{doi_prefix(args.sandbox)}{dep['conceptrecid']}"
     if concept_doi != expected_concept:
-        sys.stderr.write(
-            f"concept DOI sanity check failed: myst.yml has {concept_doi}, "
-            f"Zenodo's conceptrecid implies {expected_concept}\n"
-        )
+        emit_result("error", message=(
+            f"Concept DOI sanity check failed: myst.yml has {concept_doi}, "
+            f"Zenodo's conceptrecid implies {expected_concept}"
+        ))
         return 2
 
     if dep.get("submitted"):
@@ -350,18 +368,17 @@ def cmd_publish(args) -> int:
         # CI token; an editor must click "New version" on Zenodo to spawn the empty
         # draft, then re-run the workflow.
         record_url = dep.get("links", {}).get("record_html") or dep.get("links", {}).get("html")
-        sys.stderr.write(
-            "latest Zenodo deposition is already published and no unsubmitted draft "
-            "exists for this concept.\n"
-            "  An editor must open the record on Zenodo and click 'New version' to "
-            "spawn an empty draft, then re-run this workflow.\n"
-            f"  Record: {record_url or '(URL unavailable)'}\n"
-        )
         print(
             f"::error title=Zenodo: editor must click 'New version'::No unsubmitted "
             f"draft for this concept. Record: {record_url or '(unavailable)'}",
             file=sys.stderr,
         )
+        emit_result("error", message=(
+            f"No unsubmitted Zenodo draft exists for this concept DOI.\n\n"
+            f"An editor must open the record and click **New version** to spawn an empty draft, "
+            f"then re-run failed jobs.\n\n"
+            f"Record: {record_url or '(URL unavailable)'}"
+        ), record_url=record_url)
         return 5
     sys.stderr.write(f"[publish] reusing existing draft {dep['id']}\n")
 
@@ -376,7 +393,7 @@ def cmd_publish(args) -> int:
 
     bucket = dep.get("links", {}).get("bucket")
     if not bucket:
-        sys.stderr.write("no bucket url in deposition\n")
+        emit_result("error", message="No bucket URL in deposition (unexpected Zenodo API shape).")
         return 4
 
     repo_root = myst_path.resolve().parent
@@ -401,15 +418,13 @@ def cmd_publish(args) -> int:
 
     dep = get_deposition(api, args.token, dep["id"])
     version_doi = dep.get("metadata", {}).get("doi") or dep.get("doi") or predicted_version_doi
-    print(json.dumps(
-        {
-            "version_doi": version_doi,
-            "draft_url": dep.get("links", {}).get("html"),
-            "deposition_id": dep["id"],
-            "bundle_dir": str(bundle),
-        },
-        indent=2,
-    ))
+    emit_result(
+        "ok",
+        version_doi=version_doi,
+        draft_url=dep.get("links", {}).get("html"),
+        deposition_id=dep["id"],
+        bundle_dir=str(bundle),
+    )
     return 0
 
 

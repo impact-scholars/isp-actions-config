@@ -106,24 +106,33 @@ jobs:
           # single ZENODO_TOKEN env var.
           ZENODO_TOKEN: ${{ steps.detect.outputs.sandbox == 'true' && secrets.ZENODO_TOKEN_SANDBOX || secrets.ZENODO_TOKEN }}
         run: |
-          set -uo pipefail   # NOT errexit — we want to capture the script's exit code
+          set -euo pipefail
+          write_output_message() {
+            {
+              echo "message<<MSG_EOF"
+              printf '%s\n' "$1"
+              echo "MSG_EOF"
+            } >> "$GITHUB_OUTPUT"
+          }
           if [ -z "$ZENODO_TOKEN" ]; then
             echo "::error::ZENODO_TOKEN not set — is the org secret allowlisted to this repo?"
-            echo "exit_code=99" >> "$GITHUB_OUTPUT"
-            exit 99
+            write_output_message "ZENODO_TOKEN not set — is the org secret allowlisted to this repo?"
+            exit 1
           fi
           SANDBOX_FLAG=""
           if [ "${{ steps.detect.outputs.sandbox }}" = "true" ]; then SANDBOX_FLAG="--sandbox"; fi
+          # Tolerate non-zero — the script always emits a JSON result with a `status` field.
           python .isp-actions-config/scripts/zenodo-deposit.py publish \
             --pdf "${{ steps.pdf.outputs.path }}" \
             --tag "${{ inputs.tag }}" \
             --site-url "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}" \
             $SANDBOX_FLAG \
-            > publish-result.json
-          EXIT=$?
-          echo "exit_code=$EXIT" >> "$GITHUB_OUTPUT"
-          if [ $EXIT -ne 0 ]; then exit $EXIT; fi
+            > publish-result.json || true
           cat publish-result.json
+          STATUS=$(jq -r '.status // "crash"' publish-result.json 2>/dev/null || echo crash)
+          MESSAGE=$(jq -r '.message // "Publish script exited without writing a result. See run log."' publish-result.json 2>/dev/null || echo "Publish script exited without writing a result. See run log.")
+          write_output_message "$MESSAGE"
+          if [ "$STATUS" != "ok" ]; then exit 1; fi
           echo "draft_url=$(jq -r .draft_url publish-result.json)" >> "$GITHUB_OUTPUT"
 
       - name: Open editor-action issue on failure
@@ -131,34 +140,21 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag }}
-          PUBLISH_EXIT: ${{ steps.publish.outputs.exit_code }}
+          MESSAGE: ${{ steps.publish.outputs.message }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
           TITLE="Zenodo publish failed for $TAG"
-          # Idempotent label creation — `gh label create` exits non-zero if the label
-          # already exists, which is fine.
+          # Idempotent — gh label create returns non-zero if the label exists, which is fine.
           gh label create zenodo-publish-failed --color b60205 --description "Zenodo publish workflow failed; editor action needed" 2>/dev/null || true
           gh label create editor-action-needed --color b60205 --description "An editor must take action before this can proceed" 2>/dev/null || true
-          if [ "$PUBLISH_EXIT" = "5" ]; then
-            BODY="The publish workflow failed because **no unsubmitted Zenodo draft exists** for this concept DOI.
+          BODY="The publish workflow failed for tag \`$TAG\`.
 
-          An editor must:
-          1. Open the Zenodo record (URL in the workflow log) and click **New version** to spawn an empty draft.
-          2. Re-run failed jobs: $RUN_URL
+          $MESSAGE
 
-          Tag: \`$TAG\`
+          Run logs: $RUN_URL
 
           cc @impact-scholars/editors"
-          else
-            BODY="The publish workflow failed for tag \`$TAG\` with exit code \`$PUBLISH_EXIT\`.
-
-          An editor must investigate before this release can complete. Run logs: $RUN_URL
-
-          Once fixed, re-run failed jobs on the run above.
-
-          cc @impact-scholars/editors"
-          fi
           EXISTING=$(gh issue list --state open --search "$TITLE in:title" --json number --jq '.[0].number // empty')
           if [ -n "$EXISTING" ]; then
             gh issue comment "$EXISTING" --body "$BODY"
