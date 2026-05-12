@@ -29,10 +29,6 @@ on:
       CLOUDFLARE_ACCOUNT_ID:
         required: false
 
-env:
-  BASE_URL: ${{ inputs.base_url }}
-  BASE_ENV_VERSION: v0.1.0
-
 permissions:
   contents: read
   pages: write
@@ -46,67 +42,10 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Pages
-        if: inputs.target == 'pages'
-        uses: actions/configure-pages@v3
-
-      - name: Fetch base environment file
-        run: |
-          curl -fsSL https://raw.githubusercontent.com/impact-scholars/isp-actions-config/${{ env.BASE_ENV_VERSION }}/environment.yml -o base-environment.yml
-
-      - name: Setup Micromamba with base environment
-        uses: mamba-org/setup-micromamba@v2
-        with:
-          environment-file: base-environment.yml
-          generate-run-shell: true
-          cache-environment: true
-          cache-downloads: true
-
-      - name: Install paper-specific packages
-        run: |
-          if [ -f "${{ inputs.paper-environment-file }}" ]; then
-            echo "Found ${{ inputs.paper-environment-file }}, installing paper-specific packages..."
-            micromamba install --file ${{ inputs.paper-environment-file }} --yes
-          else
-            echo "No ${{ inputs.paper-environment-file }} found, skipping paper-specific packages"
-          fi
-        shell: micromamba-shell {0}
-
-      - name: MyST build exports (PDF, Typst)
-        run: myst build --all
-        shell: micromamba-shell {0}
-
-      - name: MyST build HTML
-        run: myst build --html
-        shell: micromamba-shell {0}
-
-      - name: Upload Pages artifact
-        if: inputs.target == 'pages'
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: "_build/html"
-
-      - name: Deploy to Cloudflare Pages
-        if: inputs.target == 'cloudflare'
-        id: cf-deploy
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy _build/html --project-name=${{ inputs.cf-project-name }} --branch=paper-${{ github.event.repository.name }}-${{ github.event.pull_request.number }}
-
-      - name: Comment preview URL on PR
-        if: inputs.target == 'cloudflare'
-        uses: marocchino/sticky-pull-request-comment@v2
-        with:
-          message: |
-            Preview deployed!
-            ${{ steps.cf-deploy.outputs.deployment-url }}
+    uses: impact-scholars/isp-actions-config/.github/workflows/build-paper.yml@main
+    with:
+      paper-environment-file: ${{ inputs.paper-environment-file }}
+      base_url: ${{ inputs.base_url }}
 
   deploy-pages:
     if: inputs.target == 'pages'
@@ -116,6 +55,46 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
+      - name: Setup Pages
+        uses: actions/configure-pages@v3
+
+      - name: Download paper build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: paper-build
+          path: _build
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _build/html
+
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+  deploy-cloudflare:
+    if: inputs.target == 'cloudflare'
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download paper build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: paper-build
+          path: _build
+
+      - name: Deploy to Cloudflare Pages
+        id: cf-deploy
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy _build/html --project-name=${{ inputs.cf-project-name }} --branch=paper-${{ github.event.repository.name }}-${{ github.event.pull_request.number }}
+
+      - name: Comment preview URL on PR
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          message: |
+            Preview deployed!
+            ${{ steps.cf-deploy.outputs.deployment-url }}
