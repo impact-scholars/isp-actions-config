@@ -26,7 +26,7 @@ concurrency:
 
 jobs:
   build:
-    uses: impact-scholars/isp-actions-config/.github/workflows/build-paper.yml@main
+    uses: impact-scholars/isp-actions-config/.github/workflows/build-paper.yml@feat/zenodo-drop
     with:
       paper-environment-file: ${{ inputs.paper-environment-file }}
       base_url: ${{ inputs.base_url }}
