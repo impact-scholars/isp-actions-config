@@ -42,7 +42,8 @@ jobs:
     runs-on: ubuntu-latest
     environment: zenodo-publish
     permissions:
-      contents: write   # commit comment on the tagged commit
+      contents: write   # commit comment on the tagged commit (success path)
+      issues: write     # create/update editor-action issue on failure
     steps:
       - name: Checkout paper repo (for myst.yml + git history)
         uses: actions/checkout@v4
@@ -105,10 +106,11 @@ jobs:
           # single ZENODO_TOKEN env var.
           ZENODO_TOKEN: ${{ steps.detect.outputs.sandbox == 'true' && secrets.ZENODO_TOKEN_SANDBOX || secrets.ZENODO_TOKEN }}
         run: |
-          set -euo pipefail
+          set -uo pipefail   # NOT errexit — we want to capture the script's exit code
           if [ -z "$ZENODO_TOKEN" ]; then
             echo "::error::ZENODO_TOKEN not set — is the org secret allowlisted to this repo?"
-            exit 1
+            echo "exit_code=99" >> "$GITHUB_OUTPUT"
+            exit 99
           fi
           SANDBOX_FLAG=""
           if [ "${{ steps.detect.outputs.sandbox }}" = "true" ]; then SANDBOX_FLAG="--sandbox"; fi
@@ -118,8 +120,51 @@ jobs:
             --site-url "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}" \
             $SANDBOX_FLAG \
             > publish-result.json
+          EXIT=$?
+          echo "exit_code=$EXIT" >> "$GITHUB_OUTPUT"
+          if [ $EXIT -ne 0 ]; then exit $EXIT; fi
           cat publish-result.json
           echo "draft_url=$(jq -r .draft_url publish-result.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Open editor-action issue on failure
+        if: failure() && steps.publish.conclusion == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          PUBLISH_EXIT: ${{ steps.publish.outputs.exit_code }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          TITLE="Zenodo publish failed for $TAG"
+          # Idempotent label creation — `gh label create` exits non-zero if the label
+          # already exists, which is fine.
+          gh label create zenodo-publish-failed --color b60205 --description "Zenodo publish workflow failed; editor action needed" 2>/dev/null || true
+          gh label create editor-action-needed --color b60205 --description "An editor must take action before this can proceed" 2>/dev/null || true
+          if [ "$PUBLISH_EXIT" = "5" ]; then
+            BODY="The publish workflow failed because **no unsubmitted Zenodo draft exists** for this concept DOI.
+
+          An editor must:
+          1. Open the Zenodo record (URL in the workflow log) and click **New version** to spawn an empty draft.
+          2. Re-run failed jobs: $RUN_URL
+
+          Tag: \`$TAG\`
+
+          cc @impact-scholars/editors"
+          else
+            BODY="The publish workflow failed for tag \`$TAG\` with exit code \`$PUBLISH_EXIT\`.
+
+          An editor must investigate before this release can complete. Run logs: $RUN_URL
+
+          Once fixed, re-run failed jobs on the run above.
+
+          cc @impact-scholars/editors"
+          fi
+          EXISTING=$(gh issue list --state open --search "$TITLE in:title" --json number --jq '.[0].number // empty')
+          if [ -n "$EXISTING" ]; then
+            gh issue comment "$EXISTING" --body "$BODY"
+          else
+            gh issue create --title "$TITLE" --body "$BODY" --label zenodo-publish-failed,editor-action-needed
+          fi
 
       - name: Upload bundle artifact
         uses: actions/upload-artifact@v4

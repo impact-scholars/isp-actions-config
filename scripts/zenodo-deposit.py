@@ -357,6 +357,11 @@ def cmd_publish(args) -> int:
             "spawn an empty draft, then re-run this workflow.\n"
             f"  Record: {record_url or '(URL unavailable)'}\n"
         )
+        print(
+            f"::error title=Zenodo: editor must click 'New version'::No unsubmitted "
+            f"draft for this concept. Record: {record_url or '(unavailable)'}",
+            file=sys.stderr,
+        )
         return 5
     sys.stderr.write(f"[publish] reusing existing draft {dep['id']}\n")
 
