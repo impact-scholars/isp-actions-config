@@ -28,11 +28,11 @@ on:
 env:
   # Ref of isp-actions-config from which the deposit script is fetched. Bump
   # together with any change to scripts/zenodo-deposit.py.
-  CONFIG_VERSION: v0.1.0
+  CONFIG_VERSION: feat/zenodo-publish
 
 jobs:
   build:
-    uses: impact-scholars/isp-actions-config/.github/workflows/build-paper.yml@v0.1.0
+    uses: impact-scholars/isp-actions-config/.github/workflows/build-paper.yml@feat/zenodo-publish
     with:
       paper-environment-file: ${{ inputs.paper-environment-file }}
       base_url: ${{ inputs.base_url }}
