@@ -1,0 +1,144 @@
+name: Publish Zenodo deposit
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: "Release tag being published (e.g. v0.1.0). Typically github.ref_name from a tag push."
+        required: true
+        type: string
+      paper-environment-file:
+        description: "Name of the paper-specific environment file (optional)"
+        required: false
+        type: string
+        default: "paper-environment.yml"
+      base_url:
+        description: "Determines where the website is served from (passed through to build-paper.yml)"
+        required: false
+        type: string
+        default: "/${{ github.event.repository.name }}"
+    secrets:
+      ZENODO_TOKEN:
+        description: "Token for zenodo.org (deposit:write scope)"
+        required: false
+      ZENODO_TOKEN_SANDBOX:
+        description: "Token for sandbox.zenodo.org (deposit:write scope)"
+        required: false
+
+env:
+  # Ref of isp-actions-config from which the deposit script is fetched. Bump
+  # together with any change to scripts/zenodo-deposit.py.
+  CONFIG_VERSION: v0.1.0
+
+jobs:
+  build:
+    uses: impact-scholars/isp-actions-config/.github/workflows/build-paper.yml@v0.1.0
+    with:
+      paper-environment-file: ${{ inputs.paper-environment-file }}
+      base_url: ${{ inputs.base_url }}
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: zenodo-publish
+    permissions:
+      contents: write   # commit comment on the tagged commit
+    steps:
+      - name: Checkout paper repo (for myst.yml + git history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # script needs full history for `git archive` + PR discovery
+
+      - name: Detect sandbox vs prod (from project.doi prefix)
+        id: detect
+        run: |
+          set -euo pipefail
+          DOI=$(awk '/^[[:space:]]*doi:/ {sub(/^[[:space:]]*doi:[[:space:]]*/, ""); print; exit}' myst.yml)
+          if [ -z "$DOI" ]; then
+            echo "::error::project.doi missing in myst.yml — run prepare-zenodo first"
+            exit 1
+          fi
+          if [[ "$DOI" == 10.5072/* ]]; then
+            echo "sandbox=true" >> "$GITHUB_OUTPUT"
+            echo "Using sandbox.zenodo.org (DOI: $DOI)"
+          else
+            echo "sandbox=false" >> "$GITHUB_OUTPUT"
+            echo "Using production zenodo.org (DOI: $DOI)"
+          fi
+
+      - name: Checkout isp-actions-config (for scripts/)
+        uses: actions/checkout@v4
+        with:
+          repository: impact-scholars/isp-actions-config
+          ref: ${{ env.CONFIG_VERSION }}
+          path: .isp-actions-config
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deposit script deps
+        run: pip install -r .isp-actions-config/scripts/requirements.txt
+
+      - name: Download paper build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: paper-build
+          path: _build
+
+      - name: Locate PDF
+        id: pdf
+        run: |
+          set -euo pipefail
+          PDF=$(find _build/exports -maxdepth 3 -name '*.pdf' | head -1)
+          if [ -z "$PDF" ]; then
+            echo "::error::no PDF found under _build/exports/"
+            exit 1
+          fi
+          echo "path=$PDF" >> "$GITHUB_OUTPUT"
+
+      - name: Publish to Zenodo
+        id: publish
+        env:
+          # Workflow picks the right secret based on detected mode; script reads a
+          # single ZENODO_TOKEN env var.
+          ZENODO_TOKEN: ${{ steps.detect.outputs.sandbox == 'true' && secrets.ZENODO_TOKEN_SANDBOX || secrets.ZENODO_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$ZENODO_TOKEN" ]; then
+            echo "::error::ZENODO_TOKEN not set — is the org secret allowlisted to this repo?"
+            exit 1
+          fi
+          SANDBOX_FLAG=""
+          if [ "${{ steps.detect.outputs.sandbox }}" = "true" ]; then SANDBOX_FLAG="--sandbox"; fi
+          python .isp-actions-config/scripts/zenodo-deposit.py publish \
+            --pdf "${{ steps.pdf.outputs.path }}" \
+            --tag "${{ inputs.tag }}" \
+            --site-url "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}" \
+            $SANDBOX_FLAG \
+            > publish-result.json
+          cat publish-result.json
+          echo "draft_url=$(jq -r .draft_url publish-result.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Upload bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: zenodo-bundle-${{ inputs.tag }}
+          path: _bundle/
+          retention-days: 30
+
+      - name: Comment on tagged commit
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.sha,
+              body: [
+                `Zenodo draft for **${{ inputs.tag }}**: ${{ steps.publish.outputs.draft_url }}`,
+                ``,
+                `Click Publish on Zenodo to finalize.`,
+              ].join('\n')
+            })

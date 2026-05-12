@@ -1,0 +1,4 @@
+# Workflow + deposit-script changes need editor review. Authors cannot
+# silently edit how their paper gets built, deployed, or deposited.
+.github/workflows/**  @impact-scholars/editors
+scripts/**            @impact-scholars/editors

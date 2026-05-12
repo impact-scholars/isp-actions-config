@@ -1,0 +1,75 @@
+name: Notify Zenodo new-version reminder
+
+# Posts a sticky comment on PRs against `main` when the paper already has a
+# `v*` tag, reminding the editor to click "New version" on Zenodo before the
+# next release. CI does not hold a `deposit:actions` token, so the empty draft
+# must be spawned manually from the Zenodo UI.
+
+on:
+  workflow_call: {}
+
+jobs:
+  remind:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout paper repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # need tag history on origin/main
+
+      - name: Look for published version on main
+        id: published
+        run: |
+          set -euo pipefail
+          TAGS=$(git tag --merged origin/main 'v*' || true)
+          if [ -z "$TAGS" ]; then
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "No v* tags merged into main: first-deposit case, no reminder."
+          else
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Parse concept DOI from myst.yml
+        if: steps.published.outputs.found == 'true'
+        id: doi
+        run: |
+          set -euo pipefail
+          # ubuntu-latest currently includes yq on GitHub-hosted runners; if this
+          # ever breaks, install yq explicitly or replace this with a Python parse step.
+          DOI=$(yq '.project.doi // ""' myst.yml)
+          if [ -z "$DOI" ] || [ "$DOI" = "null" ]; then
+            echo "::error::A v* tag exists on main but project.doi is missing from myst.yml. The repo is in an inconsistent state (published but unlinked); fix myst.yml before tagging the next release."
+            exit 1
+          fi
+          if [[ "$DOI" == 10.5072/* ]]; then
+            HOST="sandbox.zenodo.org"
+            RECID="${DOI#10.5072/zenodo.}"
+          elif [[ "$DOI" == 10.5281/* ]]; then
+            HOST="zenodo.org"
+            RECID="${DOI#10.5281/zenodo.}"
+          else
+            echo "::error::project.doi has an unrecognized prefix: $DOI (expected 10.5281/zenodo.* or 10.5072/zenodo.*)"
+            exit 1
+          fi
+          echo "doi=$DOI" >> "$GITHUB_OUTPUT"
+          echo "record_url=https://${HOST}/records/${RECID}" >> "$GITHUB_OUTPUT"
+
+      - name: Post sticky reminder comment
+        if: steps.published.outputs.found == 'true'
+        uses: marocchino/sticky-pull-request-comment@0ea0beb66eb9baf113663a64ec522f60e49231c0 # v3.0.4
+        with:
+          header: zenodo-newversion-reminder
+          message: |
+            **Zenodo new-version reminder**
+
+            This paper is already published on Zenodo. Before tagging the next release, an editor must:
+
+            1. Open the record: ${{ steps.doi.outputs.record_url }}
+            2. Click **New version** to spawn an empty draft.
+
+            CI will populate that draft once the new `v*` tag is pushed. The editor then clicks **Publish** on Zenodo to finalize.
+
+            Concept DOI: `${{ steps.doi.outputs.doi }}`
