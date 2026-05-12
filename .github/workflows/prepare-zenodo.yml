@@ -62,13 +62,21 @@ jobs:
           fi
           SANDBOX_FLAG=""
           if [ "${{ inputs.sandbox }}" = "true" ]; then SANDBOX_FLAG="--sandbox"; fi
+          # Tolerate non-zero — the script always emits a JSON result with a `status` field.
           python .isp-actions-config/scripts/zenodo-deposit.py prepare \
             --repo "${{ github.repository }}" \
             --site-url "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}" \
             --version "${{ inputs.version }}" \
             $SANDBOX_FLAG \
-            > prepare-result.json
+            > prepare-result.json || true
           cat prepare-result.json
+          FALLBACK="Prepare script exited without emitting a result. See run log."
+          STATUS=$(jq -r '.status // "crash"' prepare-result.json 2>/dev/null || echo crash)
+          if [ "$STATUS" != "ok" ]; then
+            MESSAGE=$(jq -r --arg fb "$FALLBACK" '.message // $fb' prepare-result.json 2>/dev/null || echo "$FALLBACK")
+            echo "::error::$MESSAGE"
+            exit 1
+          fi
           echo "draft_url=$(jq -r .draft_url prepare-result.json)" >> "$GITHUB_OUTPUT"
           echo "concept_doi=$(jq -r .concept_doi prepare-result.json)" >> "$GITHUB_OUTPUT"
 

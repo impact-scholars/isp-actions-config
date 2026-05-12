@@ -269,9 +269,9 @@ def cmd_prepare(args) -> int:
     project = myst["project"]
 
     if project.get("doi"):
-        sys.stderr.write(
-            f"project.doi already set ({project['doi']}); prepare is for first deposit.\n"
-        )
+        emit_result("error", message=(
+            f"project.doi already set ({project['doi']}); prepare is for first deposit."
+        ))
         return 2
 
     github_url = f"https://github.com/{args.repo}"
@@ -285,10 +285,10 @@ def cmd_prepare(args) -> int:
         sys.stderr.write(f"[prepare] reusing draft {existing['id']}\n")
         dep = update_metadata(api, args.token, existing["id"], md)
     elif existing:
-        sys.stderr.write(
-            f"[prepare] published deposit already exists ({existing['id']}); "
-            f"refusing to create a parallel concept. Add its DOI to myst.yml manually.\n"
-        )
+        emit_result("error", message=(
+            f"Published deposit already exists ({existing['id']}); refusing to create a "
+            f"parallel concept. Add its DOI to myst.yml manually."
+        ))
         return 3
     else:
         r = request(
@@ -307,10 +307,12 @@ def cmd_prepare(args) -> int:
     project["github"] = github_url
     save_myst(myst_path, y, myst)
 
-    print(json.dumps(
-        {"concept_doi": cdoi, "draft_url": draft_url, "deposition_id": dep["id"]},
-        indent=2,
-    ))
+    emit_result(
+        "ok",
+        concept_doi=cdoi,
+        draft_url=draft_url,
+        deposition_id=dep["id"],
+    )
     return 0
 
 

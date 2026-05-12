@@ -129,8 +129,9 @@ jobs:
             $SANDBOX_FLAG \
             > publish-result.json || true
           cat publish-result.json
+          FALLBACK="Publish script exited without emitting a result. See run log."
           STATUS=$(jq -r '.status // "crash"' publish-result.json 2>/dev/null || echo crash)
-          MESSAGE=$(jq -r '.message // "Publish script exited without writing a result. See run log."' publish-result.json 2>/dev/null || echo "Publish script exited without writing a result. See run log.")
+          MESSAGE=$(jq -r --arg fb "$FALLBACK" '.message // $fb' publish-result.json 2>/dev/null || echo "$FALLBACK")
           write_output_message "$MESSAGE"
           if [ "$STATUS" != "ok" ]; then exit 1; fi
           echo "draft_url=$(jq -r .draft_url publish-result.json)" >> "$GITHUB_OUTPUT"
