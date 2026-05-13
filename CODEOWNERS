@@ -1,3 +1,0 @@
-# workflows can surface protected tokens; editor review required
-.github/workflows/**  @impact-scholars/editors
-scripts/**            @impact-scholars/editors
