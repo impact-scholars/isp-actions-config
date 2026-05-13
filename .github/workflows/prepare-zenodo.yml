@@ -1,0 +1,97 @@
+name: Prepare Zenodo deposit
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: "Release version (e.g. 0.1.0, no leading v)"
+        required: true
+        type: string
+      sandbox:
+        description: "Use sandbox.zenodo.org instead of production"
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      ZENODO_TOKEN:
+        description: "Token for zenodo.org (deposit:write scope)"
+        required: false
+      ZENODO_TOKEN_SANDBOX:
+        description: "Token for sandbox.zenodo.org (deposit:write scope)"
+        required: false
+
+env:
+  # Ref of isp-actions-config from which the deposit script is fetched. Bump
+  # together with any change to scripts/zenodo-deposit.py.
+  CONFIG_VERSION: v0.2.0
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout paper repo
+        uses: actions/checkout@v4
+
+      - name: Checkout isp-actions-config (for scripts/)
+        uses: actions/checkout@v4
+        with:
+          repository: impact-scholars/isp-actions-config
+          ref: ${{ env.CONFIG_VERSION }}
+          path: .isp-actions-config
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deposit script deps
+        run: pip install -r .isp-actions-config/scripts/requirements.txt
+
+      - name: Run prepare
+        id: prepare
+        env:
+          ZENODO_TOKEN: ${{ inputs.sandbox && secrets.ZENODO_TOKEN_SANDBOX || secrets.ZENODO_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$ZENODO_TOKEN" ]; then
+            echo "::error::ZENODO_TOKEN not set — is the org secret allowlisted to this repo?"
+            exit 1
+          fi
+          SANDBOX_FLAG=""
+          if [ "${{ inputs.sandbox }}" = "true" ]; then SANDBOX_FLAG="--sandbox"; fi
+          # Tolerate non-zero: the script always emits a JSON result with a `status` field.
+          python .isp-actions-config/scripts/zenodo-deposit.py prepare \
+            --repo "${{ github.repository }}" \
+            --site-url "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}" \
+            --version "${{ inputs.version }}" \
+            $SANDBOX_FLAG \
+            > prepare-result.json || true
+          cat prepare-result.json
+          FALLBACK="Prepare script exited without emitting a result. See run log."
+          STATUS=$(jq -r '.status // "crash"' prepare-result.json 2>/dev/null || echo crash)
+          if [ "$STATUS" != "ok" ]; then
+            MESSAGE=$(jq -r --arg fb "$FALLBACK" '.message // $fb' prepare-result.json 2>/dev/null || echo "$FALLBACK")
+            echo "::error::$MESSAGE"
+            exit 1
+          fi
+          echo "draft_url=$(jq -r .draft_url prepare-result.json)" >> "$GITHUB_OUTPUT"
+          echo "concept_doi=$(jq -r .concept_doi prepare-result.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Open PR with myst.yml change
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        with:
+          branch: zenodo-prepare-${{ inputs.version }}
+          base: main
+          title: "chore: prepare zenodo deposit ${{ inputs.version }}"
+          commit-message: "chore: prepare zenodo deposit ${{ inputs.version }}"
+          add-paths: myst.yml
+          body: |
+            Prepares Zenodo deposit for `v${{ inputs.version }}`.
+
+            **Concept DOI:** `${{ steps.prepare.outputs.concept_doi }}`
+            **Draft:** ${{ steps.prepare.outputs.draft_url }}
+
+            After merging this PR, push tag `v${{ inputs.version }}` from `main` to trigger publish.

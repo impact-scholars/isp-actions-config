@@ -42,7 +42,7 @@ concurrency:
 
 jobs:
   build:
-    uses: impact-scholars/isp-actions-config/.github/workflows/build-paper.yml@v0.1.0
+    uses: impact-scholars/isp-actions-config/.github/workflows/build-paper.yml@v0.2.0
     with:
       paper-environment-file: ${{ inputs.paper-environment-file }}
       base_url: ${{ inputs.base_url }}
