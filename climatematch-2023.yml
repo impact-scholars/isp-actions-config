@@ -1,7 +1,7 @@
 version: 1
 
 extends:
-- https://raw.githubusercontent.com/impact-scholars/isp-actions-config/v0.1.0/paper-base.yml
+- https://raw.githubusercontent.com/impact-scholars/isp-actions-config/v0.2.0/paper-base.yml
 
 project:
   subject: Micropublication
