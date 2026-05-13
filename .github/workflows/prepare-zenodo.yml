@@ -23,7 +23,7 @@ on:
 env:
   # Ref of isp-actions-config from which the deposit script is fetched. Bump
   # together with any change to scripts/zenodo-deposit.py.
-  CONFIG_VERSION: feat/zenodo-publish
+  CONFIG_VERSION: v0.2.0
 
 jobs:
   prepare:
