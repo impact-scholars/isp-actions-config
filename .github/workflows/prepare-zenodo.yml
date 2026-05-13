@@ -62,7 +62,7 @@ jobs:
           fi
           SANDBOX_FLAG=""
           if [ "${{ inputs.sandbox }}" = "true" ]; then SANDBOX_FLAG="--sandbox"; fi
-          # Tolerate non-zero — the script always emits a JSON result with a `status` field.
+          # Tolerate non-zero: the script always emits a JSON result with a `status` field.
           python .isp-actions-config/scripts/zenodo-deposit.py prepare \
             --repo "${{ github.repository }}" \
             --site-url "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}" \

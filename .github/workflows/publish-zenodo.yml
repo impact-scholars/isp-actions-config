@@ -42,13 +42,13 @@ jobs:
     runs-on: ubuntu-latest
     environment: zenodo-publish
     permissions:
-      contents: write   # commit comment on the tagged commit (success path)
-      issues: write     # create/update editor-action issue on failure
+      contents: write # commit comment on the tagged commit (success path)
+      issues: write # create/update editor-action issue on failure
     steps:
       - name: Checkout paper repo (for myst.yml + git history)
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # script needs full history for `git archive` + PR discovery
+          fetch-depth: 0 # script needs full history for `git archive` + PR discovery
 
       - name: Detect sandbox vs prod (from project.doi prefix)
         id: detect
@@ -56,7 +56,7 @@ jobs:
           set -euo pipefail
           DOI=$(awk '/^[[:space:]]*doi:/ {sub(/^[[:space:]]*doi:[[:space:]]*/, ""); print; exit}' myst.yml)
           if [ -z "$DOI" ]; then
-            echo "::error::project.doi missing in myst.yml — run prepare-zenodo first"
+            echo "::error::project.doi missing in myst.yml: run prepare-zenodo first"
             exit 1
           fi
           if [[ "$DOI" == 10.5072/* ]]; then
@@ -121,7 +121,7 @@ jobs:
           fi
           SANDBOX_FLAG=""
           if [ "${{ steps.detect.outputs.sandbox }}" = "true" ]; then SANDBOX_FLAG="--sandbox"; fi
-          # Tolerate non-zero — the script always emits a JSON result with a `status` field.
+          # Tolerate non-zero: the script always emits a JSON result with a `status` field.
           python .isp-actions-config/scripts/zenodo-deposit.py publish \
             --pdf "${{ steps.pdf.outputs.path }}" \
             --tag "${{ inputs.tag }}" \
@@ -146,7 +146,6 @@ jobs:
         run: |
           set -euo pipefail
           TITLE="Zenodo publish failed for $TAG"
-          # Idempotent — gh label create returns non-zero if the label exists, which is fine.
           gh label create zenodo-publish-failed --color b60205 --description "Zenodo publish workflow failed; editor action needed" 2>/dev/null || true
           gh label create editor-action-needed --color b60205 --description "An editor must take action before this can proceed" 2>/dev/null || true
           BODY="The publish workflow failed for tag \`$TAG\`.

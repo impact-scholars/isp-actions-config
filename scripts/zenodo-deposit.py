@@ -3,6 +3,7 @@
 
 Subcommands: prepare, publish, status. See claude-plan.md.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -61,17 +62,10 @@ def is_sandbox_doi(doi: str) -> bool:
 def emit_result(status: str, **kwargs) -> None:
     """Emit the run's outcome as a single JSON object on stdout.
 
-    This is the script's contract with the calling workflow. Each subcommand must
-    call emit_result exactly once before returning.
+    Each subcommand must call emit_result exactly once before returning.
 
-    Shape:
-      success → {"status": "ok",    "version_doi": ..., "draft_url": ..., ...domain fields}
-      failure → {"status": "error", "message": "<one-line or markdown>", ...optional context}
-
-    The workflow parses `.status` (must equal "ok" to continue) and surfaces
-    `.message` verbatim in the editor-action issue body on failure. Optional
-    context fields (e.g. `record_url` for the no-draft case) are for debugging
-    via the run log; the workflow does not depend on them.
+    success: {"status": "ok",    "version_doi": ..., "draft_url": ..., ...domain fields}
+    failure: {"status": "error", "message": "<one-line or markdown>", ...optional context}
     """
     print(json.dumps({"status": status, **kwargs}, indent=2))
 
@@ -102,10 +96,12 @@ def build_metadata(myst, *, github_url, site_url, version=None, publication_date
         if orcid and ORCID_RE.match(orcid) and not orcid.startswith("0000-0000-"):
             c["orcid"] = orcid
         elif orcid:
-            sys.stderr.write(f"[warn] skipping invalid/placeholder ORCID for {a['name']}: {orcid}\n")
+            sys.stderr.write(
+                f"[warn] skipping invalid/placeholder ORCID for {a['name']}: {orcid}\n"
+            )
         creators.append(c)
 
-    keywords = [str(k) for k in (project.get("keywords") or [])]
+    keywords = [str(k) for k in project.get("keywords") or []]
     license_id = str(project.get("license") or "cc-by-4.0").lower()
 
     desc = []
@@ -114,8 +110,10 @@ def build_metadata(myst, *, github_url, site_url, version=None, publication_date
     desc.append(f'<p>Repository: <a href="{github_url}">{github_url}</a></p>')
     venue = project.get("venue")
     if venue:
-        v = venue if isinstance(venue, str) else (
-            venue.get("title") if hasattr(venue, "get") else str(venue)
+        v = (
+            venue
+            if isinstance(venue, str)
+            else (venue.get("title") if hasattr(venue, "get") else str(venue))
         )
         desc.append(f"<p>Venue: {v}</p>")
     funding = project.get("funding")
@@ -124,7 +122,9 @@ def build_metadata(myst, *, github_url, site_url, version=None, publication_date
 
     related = [{"identifier": github_url, "relation": "isVersionOf", "scheme": "url"}]
     if site_url:
-        related.append({"identifier": site_url, "relation": "isIdenticalTo", "scheme": "url"})
+        related.append(
+            {"identifier": site_url, "relation": "isIdenticalTo", "scheme": "url"}
+        )
 
     md = {
         "upload_type": "publication",
@@ -157,12 +157,12 @@ def list_my_depositions(api: str, token: str, *, q: str | None = None) -> list:
 def find_by_github(api: str, token: str, github_url: str) -> dict | None:
     items = list_my_depositions(api, token, q=f'related.identifier:"{github_url}"')
     for it in items:
-        for ri in (it.get("metadata", {}).get("related_identifiers") or []):
+        for ri in it.get("metadata", {}).get("related_identifiers") or []:
             if ri.get("identifier") == github_url:
                 return it
     if not items:
         for it in list_my_depositions(api, token):
-            for ri in (it.get("metadata", {}).get("related_identifiers") or []):
+            for ri in it.get("metadata", {}).get("related_identifiers") or []:
                 if ri.get("identifier") == github_url:
                     return it
     return None
@@ -210,9 +210,11 @@ def repo_from_github_url(url: str) -> str:
 
 
 def git_head_sha(repo_root: Path) -> str:
-    return subprocess.check_output(
-        ["git", "-C", str(repo_root), "rev-parse", "HEAD"]
-    ).decode().strip()
+    return (
+        subprocess.check_output(["git", "-C", str(repo_root), "rev-parse", "HEAD"])
+        .decode()
+        .strip()
+    )
 
 
 def discover_review_pr(repo_root: Path) -> str | None:
@@ -226,15 +228,23 @@ def discover_review_pr(repo_root: Path) -> str | None:
     return None
 
 
-def build_bundle(out: Path, pdf: Path, repo_root: Path, *, provenance: dict) -> list[Path]:
+def build_bundle(
+    out: Path, pdf: Path, repo_root: Path, *, provenance: dict
+) -> list[Path]:
     if out.exists():
         shutil.rmtree(out)
     out.mkdir(parents=True)
     shutil.copy2(pdf, out / "paper.pdf")
     subprocess.run(
         [
-            "git", "-C", str(repo_root), "archive", "--format=zip",
-            "-o", str((out / "source.zip").resolve()), "HEAD",
+            "git",
+            "-C",
+            str(repo_root),
+            "archive",
+            "--format=zip",
+            "-o",
+            str((out / "source.zip").resolve()),
+            "HEAD",
         ],
         check=True,
     )
@@ -269,9 +279,12 @@ def cmd_prepare(args) -> int:
     project = myst["project"]
 
     if project.get("doi"):
-        emit_result("error", message=(
-            f"project.doi already set ({project['doi']}); prepare is for first deposit."
-        ))
+        emit_result(
+            "error",
+            message=(
+                f"project.doi already set ({project['doi']}); prepare is for first deposit."
+            ),
+        )
         return 2
 
     github_url = f"https://github.com/{args.repo}"
@@ -285,10 +298,13 @@ def cmd_prepare(args) -> int:
         sys.stderr.write(f"[prepare] reusing draft {existing['id']}\n")
         dep = update_metadata(api, args.token, existing["id"], md)
     elif existing:
-        emit_result("error", message=(
-            f"Published deposit already exists ({existing['id']}); refusing to create a "
-            f"parallel concept. Add its DOI to myst.yml manually."
-        ))
+        emit_result(
+            "error",
+            message=(
+                f"Published deposit already exists ({existing['id']}); refusing to create a "
+                f"parallel concept. Add its DOI to myst.yml manually."
+            ),
+        )
         return 3
     else:
         r = request(
@@ -323,12 +339,18 @@ def cmd_publish(args) -> int:
 
     concept_doi = project.get("doi")
     if not concept_doi:
-        emit_result("error", message="project.doi missing — run prepare and merge that PR before tagging.")
+        emit_result(
+            "error",
+            message="project.doi missing — run prepare and merge that PR before tagging.",
+        )
         return 2
     if is_sandbox_doi(concept_doi) != args.sandbox:
-        emit_result("error", message=(
-            f"DOI prefix says sandbox={is_sandbox_doi(concept_doi)} but --sandbox={args.sandbox}."
-        ))
+        emit_result(
+            "error",
+            message=(
+                f"DOI prefix says sandbox={is_sandbox_doi(concept_doi)} but --sandbox={args.sandbox}."
+            ),
+        )
         return 2
 
     api = api_base(args.sandbox)
@@ -345,42 +367,56 @@ def cmd_publish(args) -> int:
 
     github_url = project.get("github")
     if not github_url:
-        emit_result("error", message="project.github missing — should have been set by prepare.")
+        emit_result(
+            "error", message="project.github missing — should have been set by prepare."
+        )
         return 2
 
     latest_id = latest_version_dep_id(api, args.token, concept_doi)
     if latest_id is None:
-        emit_result("error", message=(
-            f"No Zenodo record matches {concept_doi} (token mismatch? deleted draft?)"
-        ))
+        emit_result(
+            "error",
+            message=(
+                f"No Zenodo record matches {concept_doi} (token mismatch? deleted draft?)"
+            ),
+        )
         return 2
 
     dep = get_deposition(api, args.token, latest_id)
 
     expected_concept = f"{doi_prefix(args.sandbox)}{dep['conceptrecid']}"
     if concept_doi != expected_concept:
-        emit_result("error", message=(
-            f"Concept DOI sanity check failed: myst.yml has {concept_doi}, "
-            f"Zenodo's conceptrecid implies {expected_concept}"
-        ))
+        emit_result(
+            "error",
+            message=(
+                f"Concept DOI sanity check failed: myst.yml has {concept_doi}, "
+                f"Zenodo's conceptrecid implies {expected_concept}"
+            ),
+        )
         return 2
 
     if dep.get("submitted"):
         # `deposit:actions` (which newversion needs) is intentionally not granted to the
         # CI token; an editor must click "New version" on Zenodo to spawn the empty
         # draft, then re-run the workflow.
-        record_url = dep.get("links", {}).get("record_html") or dep.get("links", {}).get("html")
+        record_url = dep.get("links", {}).get("record_html") or dep.get(
+            "links", {}
+        ).get("html")
         print(
             f"::error title=Zenodo: editor must click 'New version'::No unsubmitted "
             f"draft for this concept. Record: {record_url or '(unavailable)'}",
             file=sys.stderr,
         )
-        emit_result("error", message=(
-            f"No unsubmitted Zenodo draft exists for this concept DOI.\n\n"
-            f"An editor must open the record and click **New version** to spawn an empty draft, "
-            f"then re-run failed jobs.\n\n"
-            f"Record: {record_url or '(URL unavailable)'}"
-        ), record_url=record_url)
+        emit_result(
+            "error",
+            message=(
+                f"No unsubmitted Zenodo draft exists for this concept DOI.\n\n"
+                f"An editor must open the record and click **New version** to spawn an empty draft, "
+                f"then re-run failed jobs.\n\n"
+                f"Record: {record_url or '(URL unavailable)'}"
+            ),
+            record_url=record_url,
+        )
         return 5
     sys.stderr.write(f"[publish] reusing existing draft {dep['id']}\n")
 
@@ -395,7 +431,10 @@ def cmd_publish(args) -> int:
 
     bucket = dep.get("links", {}).get("bucket")
     if not bucket:
-        emit_result("error", message="No bucket URL in deposition (unexpected Zenodo API shape).")
+        emit_result(
+            "error",
+            message="No bucket URL in deposition (unexpected Zenodo API shape).",
+        )
         return 4
 
     repo_root = myst_path.resolve().parent
@@ -419,7 +458,9 @@ def cmd_publish(args) -> int:
         upload_file(bucket, args.token, p)
 
     dep = get_deposition(api, args.token, dep["id"])
-    version_doi = dep.get("metadata", {}).get("doi") or dep.get("doi") or predicted_version_doi
+    version_doi = (
+        dep.get("metadata", {}).get("doi") or dep.get("doi") or predicted_version_doi
+    )
     emit_result(
         "ok",
         version_doi=version_doi,
@@ -490,14 +531,18 @@ def main(argv=None) -> int:
     pp = sub.add_parser("prepare", parents=[common])
     pp.add_argument("--repo", required=True, help="owner/repo on GitHub")
     pp.add_argument("--site-url", required=True)
-    pp.add_argument("--version", help="kept for parity with workflow input; unused at prepare")
+    pp.add_argument(
+        "--version", help="kept for parity with workflow input; unused at prepare"
+    )
     pp.set_defaults(func=cmd_prepare)
 
     pu = sub.add_parser("publish", parents=[common])
     pu.add_argument("--pdf", required=True, help="path to built paper.pdf")
     pu.add_argument("--tag", required=True)
     pu.add_argument("--site-url", required=True)
-    pu.add_argument("--bundle-out", default="_bundle", help="dir to assemble (debugging)")
+    pu.add_argument(
+        "--bundle-out", default="_bundle", help="dir to assemble (debugging)"
+    )
     pu.set_defaults(func=cmd_publish)
 
     ps = sub.add_parser("status", parents=[common])
