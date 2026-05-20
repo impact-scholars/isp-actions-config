@@ -7,11 +7,12 @@ project:
   subject: Micropublication
   venue: Impact Scholars Program 2025
   exports:
+  # if overriding to add articles, keep index.md first
   - format: typst
     id: typst-pdf
     articles:
     - file: index.md
-      level: 0
+      title: null
   license: CC-BY-4.0
   open_access: true
   funding: |
