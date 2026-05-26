@@ -9,6 +9,7 @@ project:
   exports:
   - format: typst
     id: typst-pdf
+    template: https://github.com/impact-scholars/isp-lapreprint-typst.git
     articles:
     - file: index.md
       level: 0
