@@ -8,7 +8,7 @@ project:
     id: typst-pdf
   downloads:
   - id: typst-pdf
-    title: PDF (Typst template)
+    title: PDF export
   # plugins:
   # - ./github-issues.mjs # might need https link
 
