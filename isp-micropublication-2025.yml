@@ -5,11 +5,12 @@ extends:
 
 project:
   subject: Micropublication
-  venue: Impact Scholars Program 2025
+  venue: Neuromatch Impact Scholars Program 2025
   exports:
   - format: typst
     id: typst-pdf
     template: https://github.com/impact-scholars/isp-lapreprint-typst.git
+    # full_width_body: false # include if abstract+summary is over one page
     articles:
     - file: index.md
       level: 0
