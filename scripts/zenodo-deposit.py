@@ -135,6 +135,7 @@ def build_metadata(myst, *, github_url, site_url, version=None, publication_date
         "license": license_id,
         "related_identifiers": related,
         "access_right": "open",
+        "communities": [{"identifier": "neuromatch"}],
     }
     if keywords:
         md["keywords"] = keywords
