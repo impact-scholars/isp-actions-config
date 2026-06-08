@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import html
 import json
 import os
 import re
@@ -82,7 +83,74 @@ def request(method: str, url: str, token: str, **kw) -> requests.Response:
     return r
 
 
-def build_metadata(myst, *, github_url, site_url, version=None, publication_date=None):
+# Raw `html` nodes are intentionally excluded so author-embedded markup is dropped.
+_TEXT_LEAVES = ("text", "inlineMath", "inlineCode")
+
+
+def _flatten_text(node, buf: list) -> None:
+    """Concatenate text under an mdast node. inlineMath/inlineCode contribute their source."""
+    if node.get("type") in _TEXT_LEAVES:
+        buf.append(node.get("value") or "")
+        return
+    for child in node.get("children") or []:
+        _flatten_text(child, buf)
+
+
+def abstract_paragraphs(repo_root: Path) -> list[str] | None:
+    """Plain-text abstract paragraphs from the MyST HTML build, if present.
+
+    `myst build --html` parses the `abstract:` frontmatter into an mdast tree at
+    frontmatter.parts.abstract.mdast in _build/site/content/<page>.json. Zenodo
+    descriptions don't render math or markup, so we flatten to text and let the
+    caller HTML-escape and wrap each paragraph in <p>. Returns None when no build
+    artifact exists (e.g. at prepare time, which doesn't build the paper).
+    """
+    content_dir = repo_root / "_build" / "site" / "content"
+    if not content_dir.is_dir():
+        return None
+    for jf in sorted(content_dir.glob("*.json")):
+        try:
+            data = json.loads(jf.read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+        part = ((data.get("frontmatter") or {}).get("parts") or {}).get("abstract")
+        mdast = part.get("mdast") if isinstance(part, dict) else part
+        if not isinstance(mdast, dict):
+            continue
+        paras: list[str] = []
+
+        def visit(node):
+            if node.get("type") == "paragraph":
+                buf: list = []
+                _flatten_text(node, buf)
+                text = "".join(buf).strip()
+                if text:
+                    paras.append(text)
+                return  # don't descend past a paragraph
+            for child in node.get("children") or []:
+                visit(child)
+
+        visit(mdast)
+        if not paras:  # no paragraph wrapper: flatten the whole subtree
+            buf: list = []
+            _flatten_text(mdast, buf)
+            text = "".join(buf).strip()
+            if text:
+                paras.append(text)
+        if paras:
+            return paras
+    return None
+
+
+def build_metadata(
+    myst,
+    *,
+    github_url,
+    site_url,
+    version=None,
+    publication_date=None,
+    abstract_paras=None,
+):
     project = myst["project"]
     creators = []
     for a in project.get("authors") or []:
@@ -105,8 +173,14 @@ def build_metadata(myst, *, github_url, site_url, version=None, publication_date
     license_id = str(project.get("license") or "cc-by-4.0").lower()
 
     desc = []
+    if abstract_paras:
+        desc.extend(f"<p>{html.escape(p)}</p>" for p in abstract_paras)
+    desc.append(
+        "<p>This micropublication was created as part of the Neuromatch "
+        "Impact Scholars Program 2025.</p>"
+    )
     if site_url:
-        desc.append(f'<p>Rendered site: <a href="{site_url}">{site_url}</a></p>')
+        desc.append(f'<p>Project Website: <a href="{site_url}">{site_url}</a></p>')
     desc.append(f'<p>Repository: <a href="{github_url}">{github_url}</a></p>')
     venue = project.get("venue")
     if venue:
@@ -291,7 +365,12 @@ def cmd_prepare(args) -> int:
     github_url = f"https://github.com/{args.repo}"
     api = api_base(args.sandbox)
 
-    md = build_metadata(myst, github_url=github_url, site_url=args.site_url)
+    md = build_metadata(
+        myst,
+        github_url=github_url,
+        site_url=args.site_url,
+        abstract_paras=abstract_paragraphs(myst_path.resolve().parent),
+    )
     md["prereserve_doi"] = True
 
     existing = find_by_github(api, args.token, github_url)
@@ -421,12 +500,14 @@ def cmd_publish(args) -> int:
         return 5
     sys.stderr.write(f"[publish] reusing existing draft {dep['id']}\n")
 
+    repo_root = myst_path.resolve().parent
     md = build_metadata(
         myst,
         github_url=github_url,
         site_url=args.site_url,
         version=version,
         publication_date=str(project.get("date") or dt.date.today().isoformat()),
+        abstract_paras=abstract_paragraphs(repo_root),
     )
     dep = update_metadata(api, args.token, dep["id"], md)
 
@@ -438,7 +519,6 @@ def cmd_publish(args) -> int:
         )
         return 4
 
-    repo_root = myst_path.resolve().parent
     # Predicted from the deposition id; matches what Zenodo assigns at publish.
     predicted_version_doi = f"{doi_prefix(args.sandbox)}{dep['id']}"
     provenance = {
@@ -512,9 +592,11 @@ def cmd_status(args) -> int:
         myst,
         github_url=project.get("github") or "",
         site_url=args.site_url or "",
+        abstract_paras=abstract_paragraphs(myst_path.resolve().parent),
     )
     out["metadata_preview_keys"] = sorted(md_preview.keys())
     out["creator_count"] = len(md_preview.get("creators", []))
+    out["description_preview"] = md_preview.get("description", "")
 
     print(json.dumps(out, indent=2))
     return 0
