@@ -27,6 +27,10 @@ PREFIX_SANDBOX = "10.5072/zenodo."
 
 ORCID_RE = re.compile(r"^\d{4}-\d{4}-\d{4}-\d{3}[\dX]$")
 
+# Extra document part appended to the Zenodo description (e.g. to express shared
+# authorship). Markup is stripped to plain text, like the abstract.
+ZENODO_EXTRA_PART = "zenodo_extra_description"
+
 
 def yaml_rt() -> YAML:
     y = YAML()
@@ -96,14 +100,15 @@ def _flatten_text(node, buf: list) -> None:
         _flatten_text(child, buf)
 
 
-def abstract_paragraphs(repo_root: Path) -> list[str] | None:
-    """Plain-text abstract paragraphs from the MyST HTML build, if present.
+def _part_paragraphs(repo_root: Path, part_name: str) -> list[str] | None:
+    """Plain-text paragraphs for a named document part from the MyST HTML build.
 
-    `myst build --html` parses the `abstract:` frontmatter into an mdast tree at
-    frontmatter.parts.abstract.mdast in _build/site/content/<page>.json. Zenodo
-    descriptions don't render math or markup, so we flatten to text and let the
-    caller HTML-escape and wrap each paragraph in <p>. Returns None when no build
-    artifact exists (e.g. at prepare time, which doesn't build the paper).
+    `myst build --html` parses frontmatter parts (e.g. `abstract:`, or a custom
+    part nested under `parts:`) into an mdast tree at frontmatter.parts.<name>.mdast
+    in _build/site/content/<page>.json. Zenodo descriptions don't render math or
+    markup, so we flatten to text and let the caller HTML-escape and wrap each
+    paragraph in <p>. Returns None when the part is absent or no build artifact
+    exists (e.g. at prepare time, which doesn't build the paper).
     """
     content_dir = repo_root / "_build" / "site" / "content"
     if not content_dir.is_dir():
@@ -113,7 +118,7 @@ def abstract_paragraphs(repo_root: Path) -> list[str] | None:
             data = json.loads(jf.read_text())
         except (OSError, json.JSONDecodeError):
             continue
-        part = ((data.get("frontmatter") or {}).get("parts") or {}).get("abstract")
+        part = ((data.get("frontmatter") or {}).get("parts") or {}).get(part_name)
         mdast = part.get("mdast") if isinstance(part, dict) else part
         if not isinstance(mdast, dict):
             continue
@@ -142,6 +147,16 @@ def abstract_paragraphs(repo_root: Path) -> list[str] | None:
     return None
 
 
+def abstract_paragraphs(repo_root: Path) -> list[str] | None:
+    """Plain-text abstract paragraphs from the MyST HTML build, if present."""
+    return _part_paragraphs(repo_root, "abstract")
+
+
+def zenodo_extra_paragraphs(repo_root: Path) -> list[str] | None:
+    """Plain-text paragraphs for the Zenodo-only extra description part, if present."""
+    return _part_paragraphs(repo_root, ZENODO_EXTRA_PART)
+
+
 def build_metadata(
     myst,
     *,
@@ -150,6 +165,7 @@ def build_metadata(
     version=None,
     publication_date=None,
     abstract_paras=None,
+    extra_desc_paras=None,
 ):
     project = myst["project"]
     creators = []
@@ -179,6 +195,8 @@ def build_metadata(
         "<p>This micropublication was created as part of the Neuromatch "
         "Impact Scholars Program 2025.</p>"
     )
+    if extra_desc_paras:
+        desc.extend(f"<p>{html.escape(p)}</p>" for p in extra_desc_paras)
     if site_url:
         desc.append(f'<p>Project Website: <a href="{site_url}">{site_url}</a></p>')
     desc.append(f'<p>Repository: <a href="{github_url}">{github_url}</a></p>')
@@ -365,11 +383,13 @@ def cmd_prepare(args) -> int:
     github_url = f"https://github.com/{args.repo}"
     api = api_base(args.sandbox)
 
+    repo_root = myst_path.resolve().parent
     md = build_metadata(
         myst,
         github_url=github_url,
         site_url=args.site_url,
-        abstract_paras=abstract_paragraphs(myst_path.resolve().parent),
+        abstract_paras=abstract_paragraphs(repo_root),
+        extra_desc_paras=zenodo_extra_paragraphs(repo_root),
     )
     md["prereserve_doi"] = True
 
@@ -508,6 +528,7 @@ def cmd_publish(args) -> int:
         version=version,
         publication_date=str(project.get("date") or dt.date.today().isoformat()),
         abstract_paras=abstract_paragraphs(repo_root),
+        extra_desc_paras=zenodo_extra_paragraphs(repo_root),
     )
     dep = update_metadata(api, args.token, dep["id"], md)
 
@@ -588,11 +609,13 @@ def cmd_status(args) -> int:
     out["latest_version"] = dep.get("metadata", {}).get("version")
     out["latest_doi"] = dep.get("metadata", {}).get("doi") or dep.get("doi")
 
+    root = myst_path.resolve().parent
     md_preview = build_metadata(
         myst,
         github_url=project.get("github") or "",
         site_url=args.site_url or "",
-        abstract_paras=abstract_paragraphs(myst_path.resolve().parent),
+        abstract_paras=abstract_paragraphs(root),
+        extra_desc_paras=zenodo_extra_paragraphs(root),
     )
     out["metadata_preview_keys"] = sorted(md_preview.keys())
     out["creator_count"] = len(md_preview.get("creators", []))
