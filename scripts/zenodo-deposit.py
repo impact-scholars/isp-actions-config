@@ -380,6 +380,10 @@ def cmd_prepare(args) -> int:
         )
         return 2
 
+    # stamp publication date if not present
+    if not project.get("date"):
+        project["date"] = dt.date.today().isoformat()
+
     github_url = f"https://github.com/{args.repo}"
     api = api_base(args.sandbox)
 
