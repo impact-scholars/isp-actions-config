@@ -157,6 +157,17 @@ def zenodo_extra_paragraphs(repo_root: Path) -> list[str] | None:
     return _part_paragraphs(repo_root, ZENODO_EXTRA_PART)
 
 
+def _youtube_url(project: dict) -> str | None:
+    """Return the YouTube seminar URL from options or social, if present."""
+    url = (project.get("options") or {}).get("youtube")
+    if url:
+        return str(url).strip()
+    url = (project.get("social") or {}).get("youtube")
+    if url:
+        return str(url).strip()
+    return None
+
+
 def build_metadata(
     myst,
     *,
@@ -197,6 +208,12 @@ def build_metadata(
     )
     if extra_desc_paras:
         desc.extend(f"<p>{html.escape(p)}</p>" for p in extra_desc_paras)
+    youtube_url = _youtube_url(project)
+    if youtube_url:
+        desc.append(
+            f'<p>Seminar Recording: <a href="{html.escape(youtube_url)}">'
+            f'Watch on YouTube</a></p>'
+        )
     if site_url:
         desc.append(f'<p>Project Website: <a href="{site_url}">{site_url}</a></p>')
     desc.append(f'<p>Repository: <a href="{github_url}">{github_url}</a></p>')
@@ -216,6 +233,10 @@ def build_metadata(
     if site_url:
         related.append(
             {"identifier": site_url, "relation": "isIdenticalTo", "scheme": "url"}
+        )
+    if youtube_url:
+        related.append(
+            {"identifier": youtube_url, "relation": "isSupplementedBy", "scheme": "url"}
         )
 
     md = {
