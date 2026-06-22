@@ -10,9 +10,8 @@ project:
   - id: typst-pdf
     title: PDF export
   # plugins:
-  # - ./github-issues.mjs # might need https link
+  # - ./github-issues.mjs
 
 site:
-  template: book-theme
   options:
     hide_toc: true
