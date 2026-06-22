@@ -11,8 +11,3 @@ project:
     title: PDF export
   # plugins:
   # - ./github-issues.mjs # might need https link
-
-site:
-  template: book-theme
-  options:
-    hide_toc: true
