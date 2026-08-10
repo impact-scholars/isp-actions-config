@@ -7,13 +7,14 @@ project:
   subject: Micropublication
   venue: Neuromatch Impact Scholars Program 2025
   exports:
+  # if overriding to add articles, keep index.md first
   - format: typst
     id: typst-pdf
     template: https://github.com/impact-scholars/isp-lapreprint-typst.git
     # full_width_body: false # include if abstract+summary is over one page
     articles:
     - file: index.md
-      level: 0
+      title: null
   license: CC-BY-4.0
   open_access: true
   funding: |

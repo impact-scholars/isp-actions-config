@@ -90,14 +90,16 @@ jobs:
 
       - name: Locate PDF
         id: pdf
+        shell: bash
         run: |
           set -euo pipefail
-          PDF=$(find _build/exports -maxdepth 3 -name '*.pdf' | head -1)
-          if [ -z "$PDF" ]; then
-            echo "::error::no PDF found under _build/exports/"
+          shopt -s globstar nullglob
+          pdfs=(_build/exports/**/*.pdf)
+          if [ ${#pdfs[@]} -ne 1 ]; then
+            echo "::error::expected exactly 1 PDF under _build/exports/, found ${#pdfs[@]}: ${pdfs[*]}"
             exit 1
           fi
-          echo "path=$PDF" >> "$GITHUB_OUTPUT"
+          echo "path=${pdfs[0]}" >> "$GITHUB_OUTPUT"
 
       - name: Publish to Zenodo
         id: publish
